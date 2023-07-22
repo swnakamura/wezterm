@@ -75,15 +75,18 @@ impl crate::TermWindow {
         };
 
         // Referencing the text being composed, but only if it belongs to this pane
-        let composing = if cursor_idx.is_some() {
-            if let DeadKeyStatus::Composing(composing) = &self.dead_key_status {
-                Some(composing)
+        let (composing, selected_range) = if cursor_idx.is_some() {
+            if let DeadKeyStatus::Composing(composing, selected_range) = &self.dead_key_status {
+                (Some(composing), selected_range.as_ref())
             } else {
-                None
+                (None, None)
             }
         } else {
-            None
+            (None, None)
         };
+
+        let mut selected_start = 0;
+        let mut selected_width = 0;
 
         let mut composition_width = 0;
 
@@ -93,6 +96,10 @@ impl crate::TermWindow {
         // Do we need to shape immediately, or can we use the pre-shaped data?
         if let Some(composing) = composing {
             composition_width = unicode_column_width(composing, None);
+            if let Some(selected_range) = selected_range {
+                selected_start = unicode_column_width(&composing[..selected_range.start], None);
+                selected_width = unicode_column_width(&composing[selected_range.clone()], None);
+            }
         }
 
         let cursor_cell = if params.stable_line_idx == Some(params.cursor.y) {
@@ -108,6 +115,13 @@ impl crate::TermWindow {
         } else {
             0..0
         };
+
+        let selected_cursor_range = if selected_width > 0 {
+            params.cursor.x + selected_start..params.cursor.x + selected_start + selected_width
+        } else {
+            0..0
+        };
+
 
         let cursor_range_pixels = params.left_pixel_x + cursor_range.start as f32 * cell_width
             ..params.left_pixel_x + cursor_range.end as f32 * cell_width;
@@ -412,6 +426,38 @@ impl crate::TermWindow {
 
                 quad.set_fg_color(cursor_border_color);
                 quad.set_alt_color_and_mix_value(cursor_border_color_alt, cursor_border_mix);
+
+                if !selected_cursor_range.is_empty()
+                    && (cursor_range.start <= selected_cursor_range.start)
+                    && (selected_cursor_range.end <= cursor_range.end)
+                {
+                    let mut quad = layers.allocate(0)?;
+                    quad.set_position(
+                        pos_x
+                            + (selected_cursor_range.start - cursor_range.start) as f32
+                                * cell_width,
+                        pos_y,
+                        pos_x
+                            + (selected_cursor_range.end - cursor_range.start) as f32 * cell_width,
+                        pos_y + cell_height,
+                    );
+                    quad.set_hsv(hsv);
+                    quad.set_has_color(false);
+
+                    quad.set_texture(
+                        gl_state
+                            .glyph_cache
+                            .borrow_mut()
+                            .cursor_sprite(
+                                cursor_shape,
+                                &params.render_metrics,
+                                (selected_cursor_range.end - selected_cursor_range.start) as u8,
+                            )?
+                            .texture_coords(),
+                    );
+
+                    quad.set_fg_color(params.selection_bg);
+                }
             }
         }
 

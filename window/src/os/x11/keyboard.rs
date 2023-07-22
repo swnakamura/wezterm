@@ -598,8 +598,181 @@ impl Keyboard {
             .feed(xcode, xsym, &self.state)
     }
 
-    pub fn compose_clear(&self) {
-        self.compose_state.borrow_mut().reset();
+    pub fn process_key_release_event(
+        &self,
+        xcb_ev: &xcb::x::KeyReleaseEvent,
+        events: &mut WindowEventSender,
+    ) {
+        let xcode = xkb::Keycode::from(xcb_ev.detail());
+        self.process_key_event_impl(xcode, false, events, false);
+    }
+
+    fn process_key_event_impl(
+        &self,
+        xcode: xkb::Keycode,
+        pressed: bool,
+        events: &mut WindowEventSender,
+        want_repeat: bool,
+    ) -> Option<WindowKeyEvent> {
+        let phys_code = self.phys_code_map.borrow().get(&xcode).copied();
+        let raw_modifiers = self.get_key_modifiers();
+
+        let xsym = self.state.borrow().key_get_one_sym(xcode);
+        let handled = Handled::new();
+
+        let raw_key_event = RawKeyEvent {
+            key: match phys_code {
+                Some(phys) => KeyCode::Physical(phys),
+                None => KeyCode::RawCode(xcode),
+            },
+            phys_code,
+            raw_code: xcode,
+            modifiers: raw_modifiers,
+            repeat_count: 1,
+            key_is_down: pressed,
+            handled: handled.clone(),
+        };
+
+        let mut kc = None;
+        let ksym = if pressed {
+            events.dispatch(WindowEvent::RawKeyEvent(raw_key_event.clone()));
+            if handled.is_handled() {
+                self.compose_state.borrow_mut().reset();
+                log::trace!("process_key_event: raw key was handled; not processing further");
+
+                if want_repeat {
+                    return Some(WindowKeyEvent::RawKeyEvent(raw_key_event.clone()));
+                }
+                return None;
+            }
+
+            match self
+                .compose_state
+                .borrow_mut()
+                .feed(xcode, xsym, &self.state)
+            {
+                FeedResult::Composing(composition) => {
+                    log::trace!(
+                        "process_key_event: RawKeyEvent FeedResult::Composing: {:?}",
+                        composition
+                    );
+                    events.dispatch(WindowEvent::AdviseDeadKeyStatus(DeadKeyStatus::Composing(
+                        composition,
+                        None,
+                    )));
+                    return None;
+                }
+                FeedResult::Composed(utf8, sym) => {
+                    if !utf8.is_empty() {
+                        kc.replace(crate::KeyCode::composed(&utf8));
+                    }
+                    log::trace!(
+                        "process_key_event: RawKeyEvent FeedResult::Composed: \
+                                {:?}, {:?}. kc -> {:?}",
+                        utf8,
+                        sym,
+                        kc
+                    );
+                    events.dispatch(WindowEvent::AdviseDeadKeyStatus(DeadKeyStatus::None));
+                    sym
+                }
+                FeedResult::Nothing(utf8, sym) => {
+                    if !utf8.is_empty() {
+                        kc.replace(crate::KeyCode::composed(&utf8));
+                    }
+                    log::trace!(
+                        "process_key_event: RawKeyEvent FeedResult::Nothing: \
+                                {:?}, {:?}. kc -> {:?}",
+                        utf8,
+                        sym,
+                        kc
+                    );
+                    sym
+                }
+                FeedResult::Cancelled => {
+                    log::trace!("process_key_event: RawKeyEvent FeedResult::Cancelled");
+                    events.dispatch(WindowEvent::AdviseDeadKeyStatus(DeadKeyStatus::None));
+                    return None;
+                }
+            }
+        } else {
+            xsym
+        };
+
+        let kc = match kc {
+            Some(kc) => kc,
+            None => match keysym_to_keycode(ksym).or_else(|| keysym_to_keycode(xsym)) {
+                Some(kc) => kc,
+                None => {
+                    log::trace!("keysym_to_keycode for {:?} and {:?} -> None", ksym, xsym);
+                    return None;
+                }
+            },
+        };
+
+        let event = KeyEvent {
+            key: kc,
+            modifiers: raw_modifiers,
+            repeat_count: 1,
+            key_is_down: pressed,
+            raw: Some(raw_key_event),
+        }
+        .normalize_shift();
+
+        if pressed && want_repeat {
+            events.dispatch(WindowEvent::KeyEvent(event.clone()));
+            // Returns the event that should be repeated later
+            Some(WindowKeyEvent::KeyEvent(event))
+        } else {
+            events.dispatch(WindowEvent::KeyEvent(event));
+            None
+        }
+    }
+
+    fn mod_is_active(&self, modifier: &str) -> bool {
+        // [TODO] consider state  Depressed & consumed mods
+        self.state
+            .borrow()
+            .mod_name_is_active(modifier, xkb::STATE_MODS_EFFECTIVE)
+    }
+
+    pub fn get_key_modifiers(&self) -> Modifiers {
+        let mut res = Modifiers::default();
+
+        if self.mod_is_active(xkb::MOD_NAME_SHIFT) {
+            res |= Modifiers::SHIFT;
+        }
+        if self.mod_is_active(xkb::MOD_NAME_CTRL) {
+            res |= Modifiers::CTRL;
+        }
+        if self.mod_is_active(xkb::MOD_NAME_ALT) {
+            // Mod1
+            res |= Modifiers::ALT;
+        }
+        if self.mod_is_active(xkb::MOD_NAME_LOGO) {
+            // Mod4
+            res |= Modifiers::SUPER;
+        }
+        res
+    }
+
+    pub fn process_xkb_event(
+        &self,
+        connection: &xcb::Connection,
+        event: &xcb::Event,
+    ) -> anyhow::Result<()> {
+        match event {
+            xcb::Event::Xkb(xcb::xkb::Event::StateNotify(e)) => {
+                self.update_state(e);
+            }
+            xcb::Event::Xkb(
+                xcb::xkb::Event::MapNotify(_) | xcb::xkb::Event::NewKeyboardNotify(_),
+            ) => {
+                self.update_keymap(connection)?;
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     pub fn update_modifier_state(

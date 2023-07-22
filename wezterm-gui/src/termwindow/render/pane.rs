@@ -381,7 +381,7 @@ impl crate::TermWindow {
                     // Constrain to the pane width!
                     let selrange = selrange.start..selrange.end.min(self.dims.cols);
 
-                    let (cursor, composing, password_input) = if self.cursor.y == stable_row {
+                    let (cursor, (composing, composing_selection), password_input) = if self.cursor.y == stable_row {
                         (
                             Some(CursorProperties {
                                 position: StableCursorPosition {
@@ -397,10 +397,10 @@ impl crate::TermWindow {
                                 cursor_is_default_color: self.cursor_is_default_color,
                             }),
                             match (self.pos.is_active, &self.term_window.dead_key_status) {
-                                (true, DeadKeyStatus::Composing(composing)) => {
-                                    Some(composing.to_string())
+                                (true, DeadKeyStatus::Composing(composing, selection)) => {
+                                    (Some(composing.to_string()), selection.clone())
                                 }
-                                _ => None,
+                                _ => (None, None),
                             },
                             if self.term_window.config.detect_password_input {
                                 match self.pos.pane.get_metadata() {
@@ -418,7 +418,7 @@ impl crate::TermWindow {
                             },
                         )
                     } else {
-                        (None, None, false)
+                        (None, (None, None), false)
                     };
 
                     let shape_hash = self.term_window.shape_hash_for_line(line);
@@ -431,6 +431,7 @@ impl crate::TermWindow {
                         shape_generation: self.term_window.shape_generation,
                         quad_generation: self.term_window.quad_generation,
                         composing: composing.clone(),
+                        composing_selection,
                         selection: selrange.clone(),
                         cursor,
                         shape_hash,
@@ -474,7 +475,7 @@ impl crate::TermWindow {
                         shape_hash,
                         shape_generation: quad_key.shape_generation,
                         composing: if self.cursor.y == stable_row && self.pos.is_active {
-                            if let DeadKeyStatus::Composing(composing) =
+                            if let DeadKeyStatus::Composing(composing, _) =
                                 &self.term_window.dead_key_status
                             {
                                 Some((self.cursor.x, composing.to_string()))

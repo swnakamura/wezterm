@@ -115,8 +115,13 @@ impl crate::TermWindow {
             None
         };
 
+        // Avoid cursor area going to get out of the screen by moving it by this value leftward
+        let cursor_range_offset =
+            (params.cursor.x + composition_width).saturating_sub(params.dims.cols);
+
         let cursor_range = if composition_width > 0 {
-            params.cursor.x..params.cursor.x + composition_width
+            params.cursor.x - cursor_range_offset
+                ..params.cursor.x + composition_width - cursor_range_offset
         } else if params.stable_line_idx == Some(params.cursor.y) {
             params.cursor.x..params.cursor.x + cursor_cell.as_ref().map(|c| c.width()).unwrap_or(1)
         } else {
@@ -124,8 +129,8 @@ impl crate::TermWindow {
         };
 
         let conversion_cursor_range = if !conversion_range_unicode.is_empty() {
-            params.cursor.x + conversion_range_unicode.start
-                ..params.cursor.x + conversion_range_unicode.end
+            params.cursor.x + conversion_range_unicode.start - cursor_range_offset
+                ..params.cursor.x + conversion_range_unicode.end - cursor_range_offset
         } else {
             0..0
         };
@@ -172,7 +177,8 @@ impl crate::TermWindow {
                 shape_key: &params.shape_key,
             };
 
-            let (shaped, invalidate_on_hover) = self.build_line_element_shape(params)?;
+            let (shaped, invalidate_on_hover) =
+                self.build_line_element_shape(params, cursor_range_offset)?;
             invalidate_on_hover_change = invalidate_on_hover;
             shaped
         };
@@ -368,7 +374,12 @@ impl crate::TermWindow {
             });
             let pos_x = (self.dimensions.pixel_width as f32 / -2.)
                 + params.left_pixel_x
-                + (phys(params.cursor.x, num_cols, direction) as f32 * cell_width);
+                + (phys(
+                    params.cursor.x.saturating_sub(cursor_range_offset),
+                    num_cols,
+                    direction,
+                ) as f32
+                    * cell_width);
 
             if cursor_shape.is_some() {
                 let mut quad = layers.allocate(0).context("layers.allocate(0)")?;
@@ -445,7 +456,8 @@ impl crate::TermWindow {
                                 * cell_width,
                         pos_y,
                         pos_x
-                            + (conversion_cursor_range.end - cursor_range.start) as f32 * cell_width,
+                            + (conversion_cursor_range.end - cursor_range.start) as f32
+                                * cell_width,
                         pos_y + cell_height,
                     );
                     quad.set_hsv(hsv);
@@ -768,6 +780,7 @@ impl crate::TermWindow {
     fn build_line_element_shape(
         &self,
         params: LineToElementParams,
+        cursor_range_offset: usize,
     ) -> anyhow::Result<(Rc<Vec<LineToElementShape>>, bool)> {
         let (bidi_enabled, bidi_direction) = params.line.bidi_info();
         let bidi_hint = if bidi_enabled {
@@ -781,7 +794,12 @@ impl crate::TermWindow {
             // Create an updated line with the composition overlaid
             let mut line = params.line.clone();
             let seqno = line.current_seqno();
-            line.overlay_text_with_attribute(*cursor_x, &composing, CellAttributes::blank(), seqno);
+            line.overlay_text_with_attribute(
+                (*cursor_x).saturating_sub(cursor_range_offset),
+                &composing,
+                CellAttributes::blank(),
+                seqno,
+            );
             line.cluster(bidi_hint)
         } else {
             params.line.cluster(bidi_hint)

@@ -381,45 +381,47 @@ impl crate::TermWindow {
                     // Constrain to the pane width!
                     let selrange = selrange.start..selrange.end.min(self.dims.cols);
 
-                    let (cursor, (composing, composing_selection), password_input) = if self.cursor.y == stable_row {
-                        (
-                            Some(CursorProperties {
-                                position: StableCursorPosition {
-                                    y: 0,
-                                    ..*self.cursor
-                                },
-                                dead_key_or_leader: self.term_window.dead_key_status
-                                    != DeadKeyStatus::None
-                                    || self.term_window.leader_is_active(),
-                                cursor_fg: self.cursor_fg,
-                                cursor_bg: self.cursor_bg,
-                                cursor_border_color: self.cursor_border_color,
-                                cursor_is_default_color: self.cursor_is_default_color,
-                            }),
-                            match (self.pos.is_active, &self.term_window.dead_key_status) {
-                                (true, DeadKeyStatus::Composing(composing, selection)) => {
-                                    (Some(composing.to_string()), selection.clone())
-                                }
-                                _ => (None, None),
-                            },
-                            if self.term_window.config.detect_password_input {
-                                match self.pos.pane.get_metadata() {
-                                    Value::Object(obj) => {
-                                        match obj.get(&Value::String("password_input".to_string()))
-                                        {
-                                            Some(Value::Bool(b)) => *b,
-                                            _ => false,
-                                        }
+                    let (cursor, (composing, conversion), password_input) =
+                        if self.cursor.y == stable_row {
+                            (
+                                Some(CursorProperties {
+                                    position: StableCursorPosition {
+                                        y: 0,
+                                        ..*self.cursor
+                                    },
+                                    dead_key_or_leader: self.term_window.dead_key_status
+                                        != DeadKeyStatus::None
+                                        || self.term_window.leader_is_active(),
+                                    cursor_fg: self.cursor_fg,
+                                    cursor_bg: self.cursor_bg,
+                                    cursor_border_color: self.cursor_border_color,
+                                    cursor_is_default_color: self.cursor_is_default_color,
+                                }),
+                                match (self.pos.is_active, &self.term_window.dead_key_status) {
+                                    (true, DeadKeyStatus::Composing{composition, conversion_range}) => {
+                                        (Some(composition.to_string()), conversion_range.clone())
                                     }
-                                    _ => false,
-                                }
-                            } else {
-                                false
-                            },
-                        )
-                    } else {
-                        (None, (None, None), false)
-                    };
+                                    _ => (None, None),
+                                },
+                                if self.term_window.config.detect_password_input {
+                                    match self.pos.pane.get_metadata() {
+                                        Value::Object(obj) => {
+                                            match obj
+                                                .get(&Value::String("password_input".to_string()))
+                                            {
+                                                Some(Value::Bool(b)) => *b,
+                                                _ => false,
+                                            }
+                                        }
+                                        _ => false,
+                                    }
+                                } else {
+                                    false
+                                },
+                            )
+                        } else {
+                            (None, (None, None), false)
+                        };
 
                     let shape_hash = self.term_window.shape_hash_for_line(line);
 
@@ -431,7 +433,7 @@ impl crate::TermWindow {
                         shape_generation: self.term_window.shape_generation,
                         quad_generation: self.term_window.quad_generation,
                         composing: composing.clone(),
-                        composing_selection,
+                        conversion,
                         selection: selrange.clone(),
                         cursor,
                         shape_hash,
@@ -475,10 +477,10 @@ impl crate::TermWindow {
                         shape_hash,
                         shape_generation: quad_key.shape_generation,
                         composing: if self.cursor.y == stable_row && self.pos.is_active {
-                            if let DeadKeyStatus::Composing(composing, _) =
+                            if let DeadKeyStatus::Composing{composition, ..} =
                                 &self.term_window.dead_key_status
                             {
-                                Some((self.cursor.x, composing.to_string()))
+                                Some((self.cursor.x, composition.to_string()))
                             } else {
                                 None
                             }

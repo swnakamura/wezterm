@@ -394,7 +394,7 @@ fn calc_str_selected_range(text: &str, feedback_array: &[u32], max: usize) -> Op
     }
 
     let mut char_indices = text.char_indices();
-    let s_start = std::cmp::min(char_indices.nth(a_start).unwrap().0, max);
+    let s_start = char_indices.nth(a_start).unwrap().0.min(max);
     let s_end = if a_end < feedback_array.len() {
         std::cmp::min(char_indices.nth(a_end - a_start - 1).unwrap().0, max)
     } else {

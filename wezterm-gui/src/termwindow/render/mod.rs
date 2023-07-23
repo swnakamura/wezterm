@@ -57,7 +57,7 @@ pub struct LineQuadCacheKey {
     pub quad_generation: usize,
     /// Only set if cursor.y == stable_row
     pub composing: Option<String>,
-    pub composing_selection: Option<Range<usize>>,
+    pub conversion: Option<Range<usize>>,
     pub selection: Range<usize>,
     pub shape_hash: [u8; 16],
     pub top_pixel_y: NotNan<f32>,

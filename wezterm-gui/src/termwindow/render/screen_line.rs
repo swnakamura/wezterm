@@ -75,9 +75,13 @@ impl crate::TermWindow {
         };
 
         // Referencing the text being composed, but only if it belongs to this pane
-        let (composing, selected_range) = if cursor_idx.is_some() {
-            if let DeadKeyStatus::Composing(composing, selected_range) = &self.dead_key_status {
-                (Some(composing), selected_range.as_ref())
+        let (composing, conversion_range) = if cursor_idx.is_some() {
+            if let DeadKeyStatus::Composing {
+                composition,
+                conversion_range,
+            } = &self.dead_key_status
+            {
+                (Some(composition), conversion_range.as_ref())
             } else {
                 (None, None)
             }
@@ -85,8 +89,7 @@ impl crate::TermWindow {
             (None, None)
         };
 
-        let mut selected_start = 0;
-        let mut selected_width = 0;
+        let mut conversion_range_unicode = Range { start: 0, end: 0 };
 
         let mut composition_width = 0;
 
@@ -96,9 +99,13 @@ impl crate::TermWindow {
         // Do we need to shape immediately, or can we use the pre-shaped data?
         if let Some(composing) = composing {
             composition_width = unicode_column_width(composing, None);
-            if let Some(selected_range) = selected_range {
-                selected_start = unicode_column_width(&composing[..selected_range.start], None);
-                selected_width = unicode_column_width(&composing[selected_range.clone()], None);
+            if let Some(conversion_range) = conversion_range {
+                let start = unicode_column_width(&composing[..conversion_range.start], None);
+                let width = unicode_column_width(&composing[conversion_range.clone()], None);
+                conversion_range_unicode = Range {
+                    start,
+                    end: start + width,
+                };
             }
         }
 
@@ -116,12 +123,12 @@ impl crate::TermWindow {
             0..0
         };
 
-        let selected_cursor_range = if selected_width > 0 {
-            params.cursor.x + selected_start..params.cursor.x + selected_start + selected_width
+        let conversion_cursor_range = if !conversion_range_unicode.is_empty() {
+            params.cursor.x + conversion_range_unicode.start
+                ..params.cursor.x + conversion_range_unicode.end
         } else {
             0..0
         };
-
 
         let cursor_range_pixels = params.left_pixel_x + cursor_range.start as f32 * cell_width
             ..params.left_pixel_x + cursor_range.end as f32 * cell_width;
@@ -427,18 +434,18 @@ impl crate::TermWindow {
                 quad.set_fg_color(cursor_border_color);
                 quad.set_alt_color_and_mix_value(cursor_border_color_alt, cursor_border_mix);
 
-                if !selected_cursor_range.is_empty()
-                    && (cursor_range.start <= selected_cursor_range.start)
-                    && (selected_cursor_range.end <= cursor_range.end)
+                if !conversion_cursor_range.is_empty()
+                    && (cursor_range.start <= conversion_cursor_range.start)
+                    && (conversion_cursor_range.end <= cursor_range.end)
                 {
                     let mut quad = layers.allocate(0)?;
                     quad.set_position(
                         pos_x
-                            + (selected_cursor_range.start - cursor_range.start) as f32
+                            + (conversion_cursor_range.start - cursor_range.start) as f32
                                 * cell_width,
                         pos_y,
                         pos_x
-                            + (selected_cursor_range.end - cursor_range.start) as f32 * cell_width,
+                            + (conversion_cursor_range.end - cursor_range.start) as f32 * cell_width,
                         pos_y + cell_height,
                     );
                     quad.set_hsv(hsv);
@@ -451,7 +458,7 @@ impl crate::TermWindow {
                             .cursor_sprite(
                                 cursor_shape,
                                 &params.render_metrics,
-                                (selected_cursor_range.end - selected_cursor_range.start) as u8,
+                                (conversion_cursor_range.end - conversion_cursor_range.start) as u8,
                             )?
                             .texture_coords(),
                     );

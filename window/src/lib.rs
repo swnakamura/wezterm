@@ -136,7 +136,10 @@ pub enum DeadKeyStatus {
     None,
     /// Holding until composition is done; the string is the uncommitted
     /// composition text to show as a placeholder
-    Composing(String, Option<Range<usize>>),
+    Composing {
+        composition: String,
+        conversion_range: Option<Range<usize>>,
+    },
 }
 
 #[derive(Debug)]

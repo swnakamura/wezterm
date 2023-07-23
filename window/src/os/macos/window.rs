@@ -2365,7 +2365,10 @@ impl WindowView {
                     Ok(TranslateStatus::Composing(composing)) => {
                         // Next key press in dead key sequence is pending.
                         inner.events.dispatch(WindowEvent::AdviseDeadKeyStatus(
-                            DeadKeyStatus::Composing(composing, None),
+                            DeadKeyStatus::Composing {
+                                composition: composing,
+                                conversion_range: None,
+                            },
                         ));
 
                         return;
@@ -2474,10 +2477,10 @@ impl WindowView {
                             // If it didn't generate an event, then a composition
                             // is pending.
                             let status = if inner.ime_last_event.is_none() {
-                                DeadKeyStatus::Composing(
-                                    inner.ime_text.clone(),
-                                    inner.selected_range.clone(),
-                                )
+                                DeadKeyStatus::Composing {
+                                    composition: inner.ime_text.clone(),
+                                    conversion_range: inner.selected_range.clone(),
+                                }
                             } else {
                                 DeadKeyStatus::None
                             };
@@ -2507,10 +2510,10 @@ impl WindowView {
                             let status = if inner.ime_text.is_empty() {
                                 DeadKeyStatus::None
                             } else {
-                                DeadKeyStatus::Composing(
-                                    inner.ime_text.clone(),
-                                    inner.selected_range.clone(),
-                                )
+                                DeadKeyStatus::Composing {
+                                    composition: inner.ime_text.clone(),
+                                    conversion_range: inner.selected_range.clone(),
+                                }
                             };
                             inner
                                 .events
@@ -3199,7 +3202,6 @@ impl WindowView {
         cls.register()
     }
 }
-
 
 fn calc_str_selected_range(
     astring: *mut Object,

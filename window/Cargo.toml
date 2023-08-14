@@ -55,6 +55,7 @@ winapi = { version = "0.3", features = [
     "handleapi",
     "imm",
     "libloaderapi",
+    "shellscalingapi",
     "synchapi",
     "sysinfoapi",
     "winerror",
@@ -85,7 +86,7 @@ futures-util = "0.3"
 futures-lite = "1.12"
 
 [target.'cfg(target_os="macos")'.dependencies]
-cocoa = "0.20"
+cocoa = "0.25"
 objc = "0.2"
 core-foundation = "0.7"
 core-graphics = "0.19"

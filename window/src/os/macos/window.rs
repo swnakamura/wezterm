@@ -607,6 +607,10 @@ impl Window {
             let width = backing_frame.size.width;
             let height = backing_frame.size.height;
 
+            let dpi = dpi_for_window_screen(*window, &config)
+                .unwrap_or(crate::DEFAULT_DPI * (backing_frame.size.width / frame.size.width))
+                as usize;
+
             let weak_window = window.weak();
             let window_handle = Window {
                 id: window_id,
@@ -637,8 +641,7 @@ impl Window {
                 dimensions: Dimensions {
                     pixel_width: width as usize,
                     pixel_height: height as usize,
-                    dpi: (crate::DEFAULT_DPI * (backing_frame.size.width / frame.size.width))
-                        as usize,
+                    dpi,
                 },
                 window_state: WindowState::default(),
                 live_resizing: false,
@@ -1228,9 +1231,16 @@ impl WindowInner {
     }
 
     fn config_did_change(&mut self, config: &ConfigHandle) {
+        let dpi_changed =
+            self.config.dpi != config.dpi || self.config.dpi_by_screen != config.dpi_by_screen;
+
         self.config = config.clone();
         if let Some(window_view) = WindowView::get_this(unsafe { &**self.view }) {
-            window_view.inner.borrow_mut().config = config.clone();
+            let mut inner = window_view.inner.borrow_mut();
+            inner.config = config.clone();
+            if dpi_changed {
+                inner.screen_changed = true;
+            }
         }
         self.update_window_shadow();
         self.update_window_background_blur();
@@ -1633,6 +1643,17 @@ pub fn superclass(this: &Object) -> &'static Class {
         let superclass: id = msg_send![this, superclass];
         &*(superclass as *const _)
     }
+}
+
+fn dpi_for_window_screen(ns_window: *mut Object, config: &ConfigHandle) -> Option<f64> {
+    if config.dpi_by_screen.is_empty() {
+        return config.dpi;
+    }
+
+    let screen = unsafe { msg_send![ns_window, screen] };
+    let info = crate::os::macos::connection::nsscreen_to_screen_info(screen);
+
+    config.dpi_by_screen.get(&info.name).copied()
 }
 
 #[allow(clippy::identity_op)]
@@ -2754,12 +2775,21 @@ impl WindowView {
                     unsafe { msg_send![*window, isZoomed] }
                 });
 
+            let dpi = inner
+                .window
+                .as_ref()
+                .and_then(|window| {
+                    let window = window.load();
+                    dpi_for_window_screen(*window, &inner.config)
+                })
+                .unwrap_or(crate::DEFAULT_DPI * (backing_frame.size.width / frame.size.width))
+                as usize;
+
             inner.events.dispatch(WindowEvent::Resized {
                 dimensions: Dimensions {
                     pixel_width: width as usize,
                     pixel_height: height as usize,
-                    dpi: (crate::DEFAULT_DPI * (backing_frame.size.width / frame.size.width))
-                        as usize,
+                    dpi,
                 },
                 window_state: if is_full_screen {
                     WindowState::FULL_SCREEN

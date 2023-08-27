@@ -254,13 +254,20 @@ impl HarfbuzzShaper {
 
                     // Tell harfbuzz to recompute important font metrics!
                     if *pair.last_size_and_dpi.borrow() != Some((point_size, dpi)) {
-                        pair.face.set_font_size(point_size, dpi)?;
+                        let selected_font_size = pair.face.set_font_size(point_size, dpi)?;
+
+                        let pixel_size = if selected_font_size.is_scaled {
+                            (point_size * dpi as f64 / 72.) as u32
+                        } else {
+                            selected_font_size.height as u32
+                        };
+
                         let mut font = pair.font.borrow_mut();
 
                         if USE_OT_FACE {
-                            font.set_ppem(0, 0);
-                            font.set_ptem(0.);
-                            let scale = (point_size * 2f64.powf(6.)) as i32;
+                            font.set_ppem(pixel_size, pixel_size);
+                            font.set_ptem(point_size as f32);
+                            let scale = pixel_size as i32 * 64;
                             font.set_font_scale(scale, scale);
                         }
 
@@ -715,15 +722,15 @@ impl FontShaper for HarfbuzzShaper {
         let scale = self.handles[font_idx].scale.unwrap_or(1.);
 
         let selected_size = pair.face.set_font_size(size * scale, dpi)?;
-        let y_scale = unsafe { (*(*pair.face.face).size).metrics.y_scale as f64 / 65536.0 };
+        let y_scale = unsafe { (*(*pair.face.face).size).metrics.y_scale.to_num::<f64>() };
         let mut metrics = FontMetrics {
             cell_height: PixelLength::new(selected_size.height),
             cell_width: PixelLength::new(selected_size.width),
             // Note: face.face.descender is useless, we have to go through
             // face.face.size.metrics to get to the real descender!
-            descender: PixelLength::new(
-                unsafe { (*(*pair.face.face).size).metrics.descender as f64 } / 64.0,
-            ),
+            descender: PixelLength::new(unsafe {
+                (*(*pair.face.face).size).metrics.descender.f26d6().to_num()
+            }),
             underline_thickness: PixelLength::new(
                 unsafe { (*pair.face.face).underline_thickness as f64 } * y_scale / 64.,
             ),
